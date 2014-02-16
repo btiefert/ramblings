@@ -1,4 +1,4 @@
-#!/bin/perl
+#!/usr/bin/perl
 
 # Parses a bitcoind debug.log (as of 0.8.6, at least)
 # Counts how many unique times it sees a client

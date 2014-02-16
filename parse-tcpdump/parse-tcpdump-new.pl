@@ -1,4 +1,4 @@
-#!/bin/perl
+#!/usr/bin/perl
 
 # Parses default output of tcpdump
 # Writes to STDOUT the first time it sees a foreign endpoint
