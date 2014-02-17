@@ -17,6 +17,9 @@
 
 use strict;
 
+my $SUMMARIZE_CLIENTS = 1;
+my $SUMMARIZE_CLIENT_VERS = 1;
+my $SUMMARIZE_COUNTS = 1;
 my $ANNOUNCE_NEW_CLIENTS = 0;# 1 turns on STOUT print each time a new address is seen for the first time
 my $ANNOUNCE_NEW_VERS = 0;   # 1 turns on STDOUT print each time a ClientVersion is seen for the first time.
 my $SUMMARIZE_EVERY=100000; # Defines the frequency (in lines parsed) that a summary is output to STDOUT
@@ -26,7 +29,8 @@ my $ipPortRegex = qr/[0-9]{0,5}/;
 my $clientVerRegex = qr/($ipAddrRegex):$ipPortRegex \/(Satoshi:)\//;
 my %addrCounter; # hash of unique ip addresses seen, value is count seen
 my %addrVerCounter; # hash of permutations $addr:$version, value is count seen
-my %verCounter; # hash of unique client versions seen, value is count seen
+my %verCounter; # hash of unique client:versions seen, value is count seen
+my %clientCounter; # hash of unique clients seen, value is count
 my %lastSeenAt; # hash of with versions as keys, value as the last seen address
 
 $SIG{TERM} = \&sighand;
@@ -38,20 +42,34 @@ sub sighand {
 }
 
 sub summarize {
-	print "\n-- Summary of unique addresses where a version was seen --\n";
+	summarize_clients() if $SUMMARIZE_CLIENTS;
+	summarize_client_vers() if $SUMMARIZE_CLIENT_VERS;
+	summarize_counts() if $SUMMARIZE_COUNTS;
+}
+
+sub summarize_clients {
+	print "--- Sum of Clients ---\n";
+	foreach ( sort { ($clientCounter{$b} <=> $clientCounter{$a}) || $a cmp $b } keys %clientCounter )
+	{
+		print $_ . " = " . $clientCounter{$_} . "\n";
+	}
+	print "\n";
+}
+
+sub summarize_client_vers {
+	print "--- Sum of ClientVers ---\n";
 	foreach ( sort { ($verCounter{$b} <=> $verCounter{$a}) || ($a cmp $b) } keys %verCounter )
 	{
 		print $_ . " = " . $verCounter{$_} . "\n";
 	}
-	# print "--- Rare versions last seen ---\n";
-	# foreach ( sort { ($verCounter{$a} <=> $verCounter{$b}) || ($a cmp $b) } keys %verCounter )
-	# {
- 	# 	print $_ . " last seen at " . $lastSeenAt{$_} . "\n";
-	# }
-	print "-----------\n";
+	print "\n";
+}
+
+sub summarize_counts {
+	print "--- Counts ---\n";
 	print scalar(keys %addrCounter) . " unique addresses.\n";
 	print scalar(keys %addrVerCounter) . " unique presumed installations.\n";
-	print "-----------\n";
+	print "\n";
 }
 
 sub countIfNewAddr {
@@ -64,8 +82,14 @@ sub countIfNewAddr {
 		# First time we've seen this version from this address, 
 		# so increment the version counter for it's version
 		$verCounter{$ver}++;
-		print localtime . " Saw a new $ver at $addr\n" if $ANNOUNCE_NEW_CLIENTS;
 
+		# Increment just the client aspect (e.g.: The "Satoshi" in "Satoshi:0.8.6"
+		if ( $ver =~ m/([^:]*):?.*$/ ) {
+			$clientCounter{$1}++;
+		}
+
+		# Verbose output if option is selected 
+		print localtime . " Saw a new $ver at $addr\n" if $ANNOUNCE_NEW_CLIENTS;
 		if ( $verCounter{$ver} == 1 ) {
 			print localtime . " First time seeing a $ver\n" if $ANNOUNCE_NEW_VERS;
 		}

@@ -3,14 +3,24 @@ parse-bitcoind-debug-clientvers.pl
 
 Parses a bitcoind debug.log to produce the following type of output:
 
-    -- Summary of unique addresses where a version was seen --
-    Satoshi:0.8.6 = 57
-    BitCoinJ:0.11 = 24
-    Satoshi:0.8.5 = 22
-    Satoshi:0.8.1 = 6
+    --- Sum of Clients ---
+    Satoshi = 93
+    BitCoinJ = 32
+    bitcoinseeder = 4
+    BQS = 3
+    getaddr.bitnodes.io = 2
+    Snoopy = 1
+    coinstats.com = 1
+    libbitcoin = 1
+    
+    --- Sum of ClientVers ---
+    Satoshi:0.8.6 = 58
+    BitCoinJ:0.11 = 26
+    Satoshi:0.8.5 = 23
+    Satoshi:0.8.1 = 7
     bitcoinseeder:0.01 = 4
-    BQS:0.0.1 = 2
-    BitCoinJ:0.10.3 = 2
+    BQS:0.0.1 = 3
+    BitCoinJ:0.10.3 = 3
     Satoshi:0.8.4 = 2
     getaddr.bitnodes.io:0.1 = 2
     BitCoinJ:0.10.1 = 1
@@ -22,7 +32,8 @@ Parses a bitcoind debug.log to produce the following type of output:
     Snoopy:0.1 = 1
     coinstats.com:0.0.3 = 1
     libbitcoin:2.0.0 = 1
-    -----------
-    130 unique addresses.
-    130 unique presumed installations.
-    -----------
+    
+    --- Counts ---
+    137 unique addresses.
+    137 unique presumed installations.
+    
