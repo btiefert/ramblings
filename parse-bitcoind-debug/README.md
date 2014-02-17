@@ -3,6 +3,7 @@ parse-bitcoind-debug-clientvers.pl
 
 Parses a bitcoind debug.log to produce the following type of output:
 
+<code>
 -- Summary of unique addresses where a version was seen --
 BQS:0.0.1 = 2
 BitCoinJ:0.10.1 = 1
@@ -26,3 +27,4 @@ libbitcoin:2.0.0 = 1
 124 unique addresses.
 124 unique presumed installations.
 -----------
+</code>
