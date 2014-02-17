@@ -109,7 +109,7 @@ while(<>) {
 		$ver = $1 if /\/([^\/]*)\// ;
 		countIfNewAddr($addr, $ver) if ($addr ne "" and $ver ne "") 
 	}
-	elsif( /($ipAddrRegex):?$ipPortRegex \/(Satoshi:.*)\// )
+	elsif( /($ipAddrRegex):?$ipPortRegex \/([^\/]*)\// )
 	{ 
 		my $addr = $1;
 		my $ver = $2;
