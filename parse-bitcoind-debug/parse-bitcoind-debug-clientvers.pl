@@ -18,7 +18,7 @@
 use strict;
 
 my $ANNOUNCE_NEW_CLIENTS = 0;# 1 turns on STOUT print each time a new address is seen for the first time
-my $ANNOUNCE_NEW_VERS = 1;   # 1 turns on STDOUT print each time a ClientVersion is seen for the first time.
+my $ANNOUNCE_NEW_VERS = 0;   # 1 turns on STDOUT print each time a ClientVersion is seen for the first time.
 my $SUMMARIZE_EVERY=100000; # Defines the frequency (in lines parsed) that a summary is output to STDOUT
 
 my $ipAddrRegex = qr/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/;
