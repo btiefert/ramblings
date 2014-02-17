@@ -5,11 +5,13 @@
 # Writes to STDOUT every 1000th time it sees a particular foreign endpoint
 # Builds a hash counting how many times each foreign end-point is seen
 
-# use strict;
+use strict;
 
 my $domesticRegex = qr/^mars\.?[0-9a-z]*$/;
 my $EVERY = 1000;
 my $arpcounter = 0;
+my $countseen = 0;
+my %hashofnodes; # hash of unique foreign end-points (host:port), value is count seen
 
 $|=1;
 while(<>) {
@@ -58,7 +60,7 @@ while(<>) {
 		$countseen = ++$hashofnodes{$foreign};
 		if( $countseen == 1 ) # New?
 		{
-			$preposition = ( $direction eq "in" ) ? "to" : "from";
+			my $preposition = ( $direction eq "in" ) ? "to" : "from";
 			print localtime . " $foreign is new $direction $preposition $domestic type $packtype\n";
 		} 
 		elsif( ! $countseen % $EVERY ) # Noisy? 
