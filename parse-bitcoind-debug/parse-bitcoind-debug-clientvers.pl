@@ -35,10 +35,15 @@ my %lastSeenAt; # hash of with versions as keys, value as the last seen address
 
 $SIG{TERM} = \&sighand;
 $SIG{INT} = \&sighand;
+$SIG{QUIT} = \&sigsummary; # allows kill -3 to cause the current summary to be output without stopping counting
 
 sub sighand {
 	summarize();
 	exit 0;
+}
+
+sub sigsummary {
+	summarize();
 }
 
 sub summarize {
