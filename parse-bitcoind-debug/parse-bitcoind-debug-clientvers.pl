@@ -39,12 +39,12 @@ sub sighand {
 
 sub summarize {
 	print "\n-- Summary of unique addresses where a version was seen --\n";
-	for (sort keys %verCounter) 
+	foreach ( sort { ($verCounter{$b} <=> $verCounter{$a}) || ($a cmp $b) } keys %verCounter )
 	{
 		print $_ . " = " . $verCounter{$_} . "\n";
 	}
 	# print "--- Rare versions last seen ---\n";
-	# foreach ( sort { ($verCounter{$a} cmp $verCounter{$b}) || ($a cmp $b) } keys %verCounter )
+	# foreach ( sort { ($verCounter{$a} <=> $verCounter{$b}) || ($a cmp $b) } keys %verCounter )
 	# {
  	# 	print $_ . " last seen at " . $lastSeenAt{$_} . "\n";
 	# }
