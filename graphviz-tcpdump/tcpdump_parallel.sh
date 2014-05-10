@@ -1,5 +1,5 @@
 #!/bin/bash
-# Dumps 500 packets using tcpdump from each cdm dev host in the file $1
+# Dumps 500 packets using tcpdump from each host listed on a line in the file $1
 # Does this in parallel using GNU parallel
 if [ $# -eq 0 ]; then
     echo "ERROR: Expected filename as parameter #1, containing list of hosts to tcpdump in parallel over ssh"
