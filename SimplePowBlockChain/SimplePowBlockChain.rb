@@ -61,6 +61,7 @@
 #    e.g.: it's fun to run 7 processes with proper difficulty and 1 process that underestimates required difficulty
 #          by a factor of 4
 # * Add block (protocol) versioning, so PoW algorithm can easily be changed in backwards compatible fashion
+# * Improve lag simulation by withholding the block announcement but without waiting to resume mining atop it
 ####################################################################################################################
 
 require 'Digest'
@@ -69,13 +70,16 @@ require 'bunny' # Using RabbitMQ for node to node communication to keep things s
 
 DIG = Digest::SHA256.new()
 MAX_BLOCK_HASH = 2 ** 256
-MIN_BLOCK_HASH_EXPONENT = 235 # drives a very simple version of difficulty
+MIN_BLOCK_HASH_EXPONENT = 234 # drives a very simple version of difficulty
 MAX_NONCE = 2 ** 128 # enough to scale to high difficulty and ensure all blocks have a solution? 
-CHUNK = 200000 # number of hashes performed per batch before stopping for housekeeping and to output progress to STDOUT
+BLOCK_ANNOUNCEMENT_HEIGHT = 10 # spam block announcements if we find a block at a multiple of this height
+CHUNK = 20000 # number of hashes performed per batch before stopping for housekeeping and to output progress to STDOUT
 PID = Process.pid
 NODE_ID = PID.to_s + "." + '127.0.0.1' # multi-process support, but deliberately no multi-computer support for now.
 BLOCKSTORE='myblocks.yaml'
-APPVERSION=1
+MAX_LAG = 5 # seconds of network lag to simulate (maximume of random range)
+MIN_LAG = 0 # seconds of network lag to simulate (minimum of random range)
+APPVERSION='0.2'
 
 class Block
 
@@ -141,6 +145,7 @@ class Block
         out += "Validity   = #{self.validateClaimedHash?() ? "VALID" : "INVALID"}\n"
         #out += "CalcHexHash= #{ padded_hex_notation(self.calculateHash())}\n"
         #out += "CalcDecHash= #{ self.calculateHash()}\n"
+        out += "Height     = #{@heightInSteps}\n"
         return out
     end
 
@@ -151,9 +156,7 @@ class Block
         ch = conn.create_channel
         x = ch.fanout("blockannouncer") 
         x.publish(self.to_yaml)
-        #q = ch.queue("blockannouncements")
-        #ch.default_exchange.publish(self.to_yaml, :routing_key => q.name)
-        puts "Announced block #{@hash}"
+        puts "<<< Announced block #{self.serializeHeader().to_s} >>>"
         conn.close
     end
 end
@@ -193,6 +196,8 @@ end
 
 class BlockChain < BlockStore
 
+    attr_accessor :indexed_blocks
+
     # inherits the very basic storage mechanics of a BlockStore, but structures blocks into a chain, enforces consensus logic (only adds valid blocks), manages a pool of orphan blocks, and maintains a very simple block index
     def initialize(target)
         super()
@@ -212,7 +217,7 @@ class BlockChain < BlockStore
         # If the block's hash is valid, and we have the parent block, add it to the pool, then re-evaluate @orphan_blocks to see 
         #   if they're still orphans.  (We might have just found one of their parents, which in turn might have it's own orphaned children)
         if isBlockInChain?(newBlock.hash)
-            puts "...already have block #{newBlock.hash}"
+            puts "... already have block #{newBlock.hash}"
             return
         end
         if ! newBlock.validateClaimedHash? then
@@ -221,18 +226,18 @@ class BlockChain < BlockStore
             return
         end
         if ! newBlock.lowEnoughHash?(@target) and ! is_genesis_block then
-            puts "...DISCARDING block - not difficult enough"
+            puts "... DISCARDING block - not difficult enough"
             return
         end
         if isBlockInChain?(newBlock.previous_block_hash) or is_genesis_block then
-            #puts "...adding block #{newBlock.hash}"
+            #puts "... adding block #{newBlock.hash}"
             # not an orphan, since we know the parent; call overloaded function to add it to @blocks
+            newBlock.heightInSteps = self.getHeightOfBlockInSteps(newBlock)
             super(newBlock)
             @indexed_blocks[newBlock.hash] = newBlock # add block to blockchain hash index
-            newBlock.heightInSteps = self.getHeightOfBlockInSteps(newBlock)
             # remove from the orphan pool if this was previously indexed as an orphan
             if isBlockInOrphanPool?(newBlock.hash) then
-                puts "...removing orphaned block since we found it's parent"
+                puts "... removing orphaned block since we found it's parent"
                 @orphan_blocks.delete(newBlock.hash)
             end
 
@@ -241,7 +246,7 @@ class BlockChain < BlockStore
                 self.addBlock(orphan) # for each block in the orphan pool, recurse to see if it now fits in the chain
             end
             #if @orphan_blocks.length > 0 then
-            #    puts "...re-evaluated orphans.  #{@orphan_blocks.length} orphans remain"
+            #    puts "... re-evaluated orphans.  #{@orphan_blocks.length} orphans remain"
             #end
         elsif ! isBlockInOrphanPool?(newBlock.hash) then 
             # orphaned block, add to @orphan_blocks pool instead
@@ -255,6 +260,7 @@ class BlockChain < BlockStore
     end
 
     def walkBlockAncestory(block, steps = 1)
+        # Yes this bloats the stack, but recursion is fun for exercises like this
         return 0 if block.hash == getGenesisBlock.hash
         # return -1 if ! @indexed_blocks.has_key?(block.hash)
         blockparent = block.previous_block_hash
@@ -284,6 +290,30 @@ class BlockChain < BlockStore
         end
         return bestblock
     end
+
+    def announceAllBlocks()
+        self.blocks.each do |knownBlock|
+            knownBlock.announce
+        end 
+    end
+
+    def writeDotFile()
+        # We can visualize the blockChain with graphViz using .dot files
+        strDot = ""
+        strDot += "digraph blockChain {\n"
+        self.blocks.each do |block|
+            parentblock = self.indexed_blocks[block.previous_block_hash]
+            if ! parentblock.nil?
+                strDot += "   \"#{block.hash}(H=#{block.heightInSteps}) from #{block.nodeid}\" -> \"#{parentblock.hash}(H=#{parentblock.heightInSteps}) from #{parentblock.nodeid}\";\n"
+            end
+        end
+        strDot += "}\n"
+        puts "Writing dot file"
+        File.open(BLOCKSTORE + "." + PID.to_s + ".dot", 'w') do |file|
+            file.write(strDot)
+        end
+        return strDot
+    end
 end
 
 def mineGenesisBlock(target)
@@ -300,8 +330,14 @@ end
 
 def main
 
+    ## Set the target hash below which all valid mined hashes must be
     target = 2 ** current_difficulty()
+
+    ## Mine the genesis block.  (Usually not needed, since it was mined once and hard coded in getGenesisBlock()
     #mineGenesisBlock(target)
+
+    puts "SimplePowBlockChain.rb " + APPVERSION.to_s
+    puts "---"
     puts "Difficulty = " + current_difficulty().to_s
     puts "Target = " + (2 ** current_difficulty()).to_s
     puts "Target = " + scientific_notation(2 ** current_difficulty())
@@ -316,60 +352,58 @@ def main
     at_exit do
         puts "Saving block chain to #{BLOCKSTORE}..."
         bc.save()
+        bc.writeDotFile()
         puts "Done."
-    end
-    lastblockinfile = bc.blocks[-1]
-    lastBlockHash = lastblockinfile.hash
-    if lastblockinfile.nil? then
-        lastBlockHash = getGenesisBlock().hash
-        puts getGenesisBlock.blockInfo(target)
-        puts "WARNING: No block store found, so mining from genesis block."
-    else
-        puts "Mining from last block in #{BLOCKSTORE}..."
-        puts lastblockinfile.blockInfo(target)
-        puts ""
-        lastBlockHash = lastblockinfile.hash
     end
 
     # Connect to your "network" via RabbitMQ
     mq_listen(bc)
 
-    # Find blocks! (Mine)
+    # Find blocks!
+    generateBlocks( bc, target)
+    exit 0
+
+end
+
+def generateBlocks( blockChain, target )
     blocksMined = 0
+    bestblock = blockChain.bestBlock()
+    puts "Mining atop this block:"
+    puts bestblock.blockInfo(target)
+    lastBlockHash = bestblock.hash # start with the best block found in the chain
     while ( true ) do
-        # newBlock = findBlock( bc, lastBlockHash, "Hi", target ) # keep out of this variant of findBlock until it learns to abandon old base blocks
-        newBlock = findBlock_with_progress( bc, lastBlockHash, "Hi", target )
+
+        newBlock = findBlock( blockChain, lastBlockHash, "Hi", target ) # keep out of this variant of findBlock until it learns to abandon old base blocks
+        # newBlock = findBlock_with_progress( blockChain, lastBlockHash, "Hi", target )
+        blocksMined = blocksMined + 1
+        blockChain.addBlock(newBlock)
+
         puts ""
         puts "Found block!"
-        blocksMined = blocksMined + 1
         puts newBlock.blockInfo(target)
         puts ""
-        bc.addBlock(newBlock)
-        sleep(rand 10) # simulate network lag, so we get interesting things like block races
+
+        sleep(MIN_LAG + rand(MAX_LAG-MIN_LAG)) # simulate network lag, so we get interesting things like block races
         newBlock.announce()
-        puts "...height of mined block is #{bc.getHeightOfBlockInSteps(newBlock)}"
 
         # Calculate best block to continue working on
-        bestblock = bc.bestBlock()
-        puts "Best block from my perspective is #{bestblock.heightInSteps} tall"
+        bestblock = blockChain.bestBlock()
         if bestblock.heightInSteps > newBlock.heightInSteps
             # switch!
             lastBlockHash = bestblock.hash
-            puts "<<<<<<< !!! I LOST A RACE !!! >>>>>"
+            puts "::: I LOST A BLOCK RACE :::"
         elsif bestblock.hash != newBlock.hash
-            # race!
-            puts "<<< !! IT'S A RACE !! >>>"
+            # A different block was received at around the same time I found my block.  It's a block race!
+            puts "!!! IT'S A BLOCK RACE !!!"
             lastBlockHash = newBlock.hash
         else
-            puts "<< Still the best baby >>"
+            puts "!!! Mining atop my own block !!!"
             lastBlockHash = newBlock.hash
         end
           
-        if blocksMined % 25  == 0 then
-            # Every N blocks, broadcast all blocks to the network to help bootstrap new nodes without having to have them ask or rumour
-            bc.blocks.each do |knownBlock|
-                knownBlock.announce
-            end 
+        if newBlock.heightInSteps % BLOCK_ANNOUNCEMENT_HEIGHT  == 0 then
+            # If we just found a block at a height easily divisible by BLOCK_ANNOUNCEMENT_HEIGHT, spam everyone with a copy of all blocks in our chain
+            blockChain.announceAllBlocks
         end
     end
 end
@@ -386,6 +420,14 @@ def findBlock( blockChain, prevBlockHash, payload, target )
             # using findBlock() will blindly keep going for it's own next block
             # without checking for newly arrived ones, unlike findBlock_with_progress, which
             # is capable of stopping every CHUNK blocks for housekeeping
+            if ( block.nonce % CHUNK == 0 )  then
+                # Check to see if a better block has been received
+                bestHeight = blockChain.bestBlock.heightInSteps
+                if( bestHeight >= blockChain.getHeightOfBlockInSteps(block) )
+                    puts ">>> Switching to mine atop received block <<<"
+                    block.previous_block_hash = blockChain.bestBlock.hash
+                end      
+            end
     end
     return block
 end
@@ -419,7 +461,7 @@ def findBlock_with_progress( blockChain, prevBlockHash, payload, target )
                 # Check to see if a better block has been received
                 bestHeight = blockChain.bestBlock.heightInSteps
                 if( bestHeight >= blockChain.getHeightOfBlockInSteps(block) )
-                    puts "<<<<<<<<< Switching midstream >>>>>>>>>"
+                    puts "<<< Switching to mine atop received block >>>"
                     block.previous_block_hash = blockChain.bestBlock.hash
                 end      
     
@@ -465,7 +507,7 @@ def mq_listen(blockChain)
         receivedBlock = YAML.load(body)
         if receivedBlock.nodeid != NODE_ID then
             blockChain.addBlock(receivedBlock)
-            puts "== BLOCK RECEIVED AT HEIGHT #{blockChain.getHeightOfBlockInSteps(receivedBlock)} HEADER #{receivedBlock.serializeHeader} from #{receivedBlock.nodeid}"
+            puts "=== BLOCK RECEIVED AT HEIGHT #{blockChain.getHeightOfBlockInSteps(receivedBlock)} HEADER #{receivedBlock.serializeHeader} from #{receivedBlock.nodeid}"
         end
     end
 end
