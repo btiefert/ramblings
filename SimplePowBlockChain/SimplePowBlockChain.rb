@@ -81,6 +81,12 @@ MAX_LAG = 5 # seconds of network lag to simulate (maximume of random range)
 MIN_LAG = 0 # seconds of network lag to simulate (minimum of random range)
 APPVERSION='0.2'
 
+# Output verbosity flags
+DEBUG_BLOCKCHAIN_MGT = true
+DEBUG_BLOCK_ANNOUNCEMENTS = true
+DEBUG_BLOCK_RECEIVED = false
+DEBUG_MINING_FOCUS = true
+
 class Block
 
     attr_accessor :previous_block_hash, :payload, :nonce, :hash, :nodeid, :heightInSteps
@@ -137,7 +143,7 @@ class Block
         # Returns a string with information about this block.
         out = ""
         out += "HexHeader  = #{self.serializeHeader().to_s}\n"
-        out += "HexDigest  = #{padded_hex_notation(@hash)}\n"
+        out += "HexDigest  = #{self.hexHash}\n"
         out += "DecDigest  = #{@hash}\n"
         out += "DecNonce   = #{@nonce}\n"
         out += "Difficulty = #{scientific_notation(@hash)}\n"
@@ -149,6 +155,10 @@ class Block
         return out
     end
 
+    def hexHash
+        return padded_hex_notation(@hash)
+    end
+
     def announce()
         # announces this block to other nodes via RabbitMQ exchange
         conn = Bunny.new
@@ -156,7 +166,7 @@ class Block
         ch = conn.create_channel
         x = ch.fanout("blockannouncer") 
         x.publish(self.to_yaml)
-        puts "<<< Announced block #{self.serializeHeader().to_s} >>>"
+        puts "<<< Announced block #{self.hexHash} >>>" if DEBUG_BLOCK_ANNOUNCEMENTS
         conn.close
     end
 end
@@ -217,27 +227,27 @@ class BlockChain < BlockStore
         # If the block's hash is valid, and we have the parent block, add it to the pool, then re-evaluate @orphan_blocks to see 
         #   if they're still orphans.  (We might have just found one of their parents, which in turn might have it's own orphaned children)
         if isBlockInChain?(newBlock.hash)
-            puts "... already have block #{newBlock.hash}"
+            puts "... already have block #{newBlock.hexHash}" if DEBUG_BLOCKCHAIN_MGT
             return
         end
         if ! newBlock.validateClaimedHash? then
-            puts "WARNING: Block's claimed hash is not valid.  Dropping from pool:"
+            puts "WARNING: Block's claimed hash is not valid.  Dropping from pool:" if DEBUG_BLOCKCHAIN_MGT
             puts newBlock.blockInfo(@target)
             return
         end
         if ! newBlock.lowEnoughHash?(@target) and ! is_genesis_block then
-            puts "... DISCARDING block - not difficult enough"
+            puts "... DISCARDING block - not difficult enough" if DEBUG_BLOCKCHAIN_MGT
             return
         end
         if isBlockInChain?(newBlock.previous_block_hash) or is_genesis_block then
-            #puts "... adding block #{newBlock.hash}"
+            #puts "... adding block #{newBlock.hash}" if DEBUG_BLOCKCHAIN_MGT
             # not an orphan, since we know the parent; call overloaded function to add it to @blocks
             newBlock.heightInSteps = self.getHeightOfBlockInSteps(newBlock)
             super(newBlock)
             @indexed_blocks[newBlock.hash] = newBlock # add block to blockchain hash index
             # remove from the orphan pool if this was previously indexed as an orphan
             if isBlockInOrphanPool?(newBlock.hash) then
-                puts "... removing orphaned block since we found it's parent"
+                puts "... removing orphaned block since we found its parent" if DEBUG_BLOCKCHAIN_MGT
                 @orphan_blocks.delete(newBlock.hash)
             end
 
@@ -246,11 +256,11 @@ class BlockChain < BlockStore
                 self.addBlock(orphan) # for each block in the orphan pool, recurse to see if it now fits in the chain
             end
             #if @orphan_blocks.length > 0 then
-            #    puts "... re-evaluated orphans.  #{@orphan_blocks.length} orphans remain"
+            #    puts "... re-evaluated orphans.  #{@orphan_blocks.length} orphans remain" if DEBUG_BLOCKCHAIN_MGT
             #end
         elsif ! isBlockInOrphanPool?(newBlock.hash) then 
             # orphaned block, add to @orphan_blocks pool instead
-            puts "... adding block to orphan pool #{newBlock.serializeHeader}."
+            puts "... adding block to orphan pool #{newBlock.hexHash}" if DEBUG_BLOCKCHAIN_MGT
             @orphan_blocks[newBlock.hash] = newBlock
         end
     end
@@ -391,13 +401,13 @@ def generateBlocks( blockChain, target )
         if bestblock.heightInSteps > newBlock.heightInSteps
             # switch!
             lastBlockHash = bestblock.hash
-            puts "::: I LOST A BLOCK RACE :::"
+            puts "::: I LOST A BLOCK RACE :::" if DEBUG_MINING_FOCUS
         elsif bestblock.hash != newBlock.hash
             # A different block was received at around the same time I found my block.  It's a block race!
-            puts "!!! IT'S A BLOCK RACE !!!"
+            puts "!!! IT'S A BLOCK RACE !!!" if DEBUG_MINING_FOCUS
             lastBlockHash = newBlock.hash
         else
-            puts "!!! Mining atop my own block !!!"
+            puts "!!! Mining atop my own block !!!" if DEBUG_MINING_FOCUS
             lastBlockHash = newBlock.hash
         end
           
@@ -422,10 +432,10 @@ def findBlock( blockChain, prevBlockHash, payload, target )
             # is capable of stopping every CHUNK blocks for housekeeping
             if ( block.nonce % CHUNK == 0 )  then
                 # Check to see if a better block has been received
-                bestHeight = blockChain.bestBlock.heightInSteps
-                if( bestHeight >= blockChain.getHeightOfBlockInSteps(block) )
-                    puts ">>> Switching to mine atop received block <<<"
-                    block.previous_block_hash = blockChain.bestBlock.hash
+                theBestBlock = blockChain.bestBlock
+                if( theBestBlock.heightInSteps >= blockChain.getHeightOfBlockInSteps(block) )
+                    puts ">>> Switching to mine atop received block at height #{theBestBlock.heightInSteps} (#{theBestBlock.hexHash}) <<<" if DEBUG_MINING_FOCUS
+                    block.previous_block_hash = theBestBlock.hash
                 end      
             end
     end
@@ -459,10 +469,10 @@ def findBlock_with_progress( blockChain, prevBlockHash, payload, target )
                 # Stop for a moment to listen for block announcements
 
                 # Check to see if a better block has been received
-                bestHeight = blockChain.bestBlock.heightInSteps
-                if( bestHeight >= blockChain.getHeightOfBlockInSteps(block) )
-                    puts "<<< Switching to mine atop received block >>>"
-                    block.previous_block_hash = blockChain.bestBlock.hash
+                theBestBlock = blockChain.bestBlock
+                if( theBestBlock.heightInSteps >= blockChain.getHeightOfBlockInSteps(block) )
+                    puts ">>> Switching to mine atop received block at height #{theBestBlock.heightInSteps} (#{theBestBlock.hexHash}) <<<" if DEBUG_MINING_FOCUS
+                    block.previous_block_hash = theBestBlock.hash
                 end      
     
                 # Reset local bests and timer
@@ -507,7 +517,7 @@ def mq_listen(blockChain)
         receivedBlock = YAML.load(body)
         if receivedBlock.nodeid != NODE_ID then
             blockChain.addBlock(receivedBlock)
-            puts "=== BLOCK RECEIVED AT HEIGHT #{blockChain.getHeightOfBlockInSteps(receivedBlock)} HEADER #{receivedBlock.serializeHeader} from #{receivedBlock.nodeid}"
+            puts "=== BLOCK RECEIVED AT HEIGHT #{blockChain.getHeightOfBlockInSteps(receivedBlock)} HEADER #{receivedBlock.serializeHeader} from #{receivedBlock.nodeid}" if DEBUG_BLOCK_RECEIVED
         end
     end
 end
