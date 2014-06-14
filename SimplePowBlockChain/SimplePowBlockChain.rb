@@ -250,7 +250,7 @@ class BlockChain < BlockStore
             #end
         elsif ! isBlockInOrphanPool?(newBlock.hash) then 
             # orphaned block, add to @orphan_blocks pool instead
-            puts "Adding block to orphan pool #{newBlock.hash}."
+            puts "... adding block to orphan pool #{newBlock.serializeHeader}."
             @orphan_blocks[newBlock.hash] = newBlock
         end
     end
