@@ -215,9 +215,7 @@ class BlockChain < BlockStore
         @indexed_blocks = Hash.new() # index of block objects based on their hash
         @target=target
         # add genesis block
-        genesis_block = getGenesisBlock # mineGenesisBlock(target)
-        #@indexed_blocks[genesis_block.hash] = genesis_block
-        self.addBlock genesis_block, true
+        self.addBlock getGenesisBlock, true
     end
 
     def addBlock(newBlock, is_genesis_block = false)
@@ -357,8 +355,10 @@ def main
     begin
         bc.load()
     rescue
-        puts "ERROR: Could not load #{BLOCKSTORE}" 
+        puts "ERROR: Could not load #{BLOCKSTORE}.  Starting with empty blockchain instead.  (Genesis block only)" 
     end
+    
+    # Set event to write blockchain to disk on exit (this is trapped on a CTRL-C or other SIGTERM)
     at_exit do
         puts "Saving block chain to #{BLOCKSTORE}..."
         bc.save()
@@ -366,7 +366,7 @@ def main
         puts "Done."
     end
 
-    # Connect to your "network" via RabbitMQ
+    # Connect to your "network" via RabbitMQ.  This will receive block announcements
     mq_listen(bc)
 
     # Find blocks!
@@ -492,7 +492,7 @@ end
 
 def current_difficulty
     # To-Do: should not call this bit count a difficulty.   Using bitcounts as difficulty means we can only change in powers of 2!
-    return MIN_BLOCK_HASH_EXPONENT # 236
+    return MIN_BLOCK_HASH_EXPONENT
 end
 
 def scientific_notation(input_number)
