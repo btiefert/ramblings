@@ -14,6 +14,8 @@
 # Usage
 # ---
 # * Start RabbitMQ server on the local host
+#   (This can be installed on a Mac via "brew install rabbitmq", which also outputs instructions for startup)
+#   (For more install RabbitMQ install instructions, see http://www.rabbitmq.com/download.html)
 # * Start as one more more instances of SimplePowBlockChain.rb and watch each instance compete to mine and converge to 
 #   concensus
 # * SimplePowBlockChain.rb will create a RabbitMQ fanout exchange called "blockannouncer" and will setup temporary queues
