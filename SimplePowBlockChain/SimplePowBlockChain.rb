@@ -91,7 +91,9 @@ DEBUG_MINING_FOCUS = true
 
 class Block
 
-    attr_accessor :previous_block_hash, :payload, :nonce, :hash, :nodeid, :heightInSteps
+    attr_accessor :previous_block_hash, :payload, :nonce, :hash, :nodeid, :heightInSteps, :recTime, :genTime
+    # recTime is received DateTime, for blocks received from the network; naturally each node will have it's own notion of recTime for each block
+    # genTime is generated DateTime (point in time that the announcing node claims the block was mined/generated)
 
     # Constructor
     def initialize(previous_block_hash, payload, nonce = 0, hash = nil)
@@ -100,6 +102,8 @@ class Block
         @nonce = nonce 
         @nodeid = NODE_ID  # we keep this around just so we can see which process found each block
         @heightInSteps = -2
+        @recTime = nil
+        @genTime = nil
         if hash.nil? then
             self.updateStoredHash!()
         else
@@ -149,6 +153,8 @@ class Block
         out += "DecDigest  = #{@hash}\n"
         out += "DecNonce   = #{@nonce}\n"
         out += "Difficulty = #{scientific_notation(@hash)}\n"
+        out += "genTime    = #{@genTime.to_s}\n"
+        out += "recTime    = #{@recTime.to_s}\n"
         #out += "LowEnough  = #{self.lowEnoughHash?(target) ? "YES" : "NO"}\n"
         out += "Validity   = #{self.validateClaimedHash?() ? "VALID" : "INVALID"}\n"
         #out += "CalcHexHash= #{ padded_hex_notation(self.calculateHash())}\n"
@@ -441,6 +447,8 @@ def findBlock( blockChain, prevBlockHash, payload, target )
                 end      
             end
     end
+    block.genTime = Time.now()
+    block.recTime = block.genTime
     return block
 end
 
@@ -489,6 +497,9 @@ def findBlock_with_progress( blockChain, prevBlockHash, payload, target )
     block_elapsed_time = (t2 - t0) # seconds
     puts "Overall hash rate for this block is " + (( block.nonce - startingNonce ) / block_elapsed_time ).to_s + " hash/sec"
     puts "Elapsed time to mine this block is #{block_elapsed_time} seconds."
+
+    block.genTime = Time.now()
+    block.recTime = block.genTime
     return block
 end
 
@@ -517,6 +528,7 @@ def mq_listen(blockChain)
     q.subscribe(:block => false) do |delivery_info, properties, body|
         # to-do: Cause  mining to stop if this is a better base block by more directly raising an event
         receivedBlock = YAML.load(body)
+        receivedBlock.recTime = Time.now()
         if receivedBlock.nodeid != NODE_ID then
             blockChain.addBlock(receivedBlock)
             puts "=== BLOCK RECEIVED AT HEIGHT #{blockChain.getHeightOfBlockInSteps(receivedBlock)} HEADER #{receivedBlock.serializeHeader} from #{receivedBlock.nodeid}" if DEBUG_BLOCK_RECEIVED
