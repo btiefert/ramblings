@@ -81,10 +81,11 @@ NODE_ID = PID.to_s + "." + '127.0.0.1' # multi-process support, but deliberately
 BLOCKSTORE='myblocks.yaml'
 MAX_LAG = 5 # seconds of network lag to simulate (maximume of random range)
 MIN_LAG = 0 # seconds of network lag to simulate (minimum of random range)
+DIFFICULTY_RETARGET_INTERVAL = 2048 # blocks
 APPVERSION='0.2'
 
 # Output verbosity flags
-DEBUG_BLOCKCHAIN_MGT = true
+DEBUG_BLOCKCHAIN_MGT = false
 DEBUG_BLOCK_ANNOUNCEMENTS = true
 DEBUG_BLOCK_RECEIVED = false
 DEBUG_MINING_FOCUS = true
@@ -177,6 +178,10 @@ class Block
         puts "<<< Announced block #{self.hexHash} >>>" if DEBUG_BLOCK_ANNOUNCEMENTS
         conn.close
     end
+
+    def to_s
+        self.blockInfo()
+    end
 end
 
 class BlockStore
@@ -214,6 +219,8 @@ end
 
 class BlockChain < BlockStore
 
+    include Enumerable
+
     attr_accessor :indexed_blocks
 
     # inherits the very basic storage mechanics of a BlockStore, but structures blocks into a chain, enforces consensus logic (only adds valid blocks), manages a pool of orphan blocks, and maintains a very simple block index
@@ -246,7 +253,7 @@ class BlockChain < BlockStore
             return
         end
         if isBlockInChain?(newBlock.previous_block_hash) or is_genesis_block then
-            #puts "... adding block #{newBlock.hash}" if DEBUG_BLOCKCHAIN_MGT
+            puts "... adding block #{newBlock.hash}" if DEBUG_BLOCKCHAIN_MGT
             # not an orphan, since we know the parent; call overloaded function to add it to @blocks
             newBlock.heightInSteps = self.getHeightOfBlockInSteps(newBlock)
             super(newBlock)
@@ -285,6 +292,65 @@ class BlockChain < BlockStore
         end
         return -1 if ! @indexed_blocks.has_key?(blockparent)
         return walkBlockAncestory(@indexed_blocks[blockparent], steps + 1)
+    end
+
+    # Enumeration Operators
+    def <<(block)
+        self.addBlock(block)
+    end
+    def each
+       @indexed_blocks.each { |i| yield(i) }
+    end 
+    def length
+        @indexed_blocks.length
+    end
+    def blockAncestors(block)
+        # returns a BlockChain object that contains just the given block and it's ancestors; a subset of @indexed_blocks
+        # maxBlocks is the maximum number of blocks to return (including the block given), 0 == unlimited (walks all the way to genesis block or broken chain)
+        if ! isBlockInChain?(block.hash)
+            return nil
+        end
+        newbc = BlockChain.new(@target)
+        newbc << block
+        blockAncestorsArr(block).each do |b|
+            newbc.addBlock(b)
+        end
+        return newbc
+    end
+    def blockAncestorsArr(block, maxBlocks = 0, steps = 1)
+        # Takes a block and walks it's parents back up to maxsteps steps.
+        # Runs the enclosed code block while "unwinding" from earliest block to given block
+
+        # puts "Entering #{block.hash} with parent #{block.previous_block_hash}"
+        if ! block.class == "Block" 
+            raise "ERROR: Expecting block arguement to be of class Block.   Instead was #{block.class}"
+        end
+
+        baOut = Array.new()
+        if block.hash == getGenesisBlock.hash
+            baOut << block
+            return baOut
+        end
+        
+        parentBlocks = Array.new()
+        if ! @indexed_blocks.has_key?(block.previous_block_hash)
+            # This covers a partial block chain that does not lead back to the genesis block.   Once we get to a prev block hash we 
+            # don't have a block for, stop here.
+            return Array.new()
+        end
+
+        # get *this* block's ancestors, and accumulate them into the baOut array
+        if maxBlocks == 0 or maxBlocks > steps then
+            # Keep recursing through parents until we've hit the maxBlocks (or if maxBlocks == 0 which is treated as unlimited)
+            blockAncestorsArr( @indexed_blocks[block.previous_block_hash], maxBlocks, steps + 1 ).each do |parent|
+                baOut << parent
+            end
+        end
+
+        # add self
+        baOut << block
+
+        return baOut
     end
 
     def isBlockInChain?(blockHash)
@@ -366,7 +432,7 @@ def main
         puts "ERROR: Could not load #{BLOCKSTORE}.  Starting with empty blockchain instead.  (Genesis block only)" 
     end
     
-    # Set event to write blockchain to disk on exit (this is trapped on a CTRL-C or other SIGTERM)
+    ## Set event to write blockchain to disk on exit (this is trapped on a CTRL-C or other SIGTERM)
     at_exit do
         puts "Saving block chain to #{BLOCKSTORE}..."
         bc.save()
@@ -377,7 +443,22 @@ def main
     # Connect to your "network" via RabbitMQ.  This will receive block announcements
     mq_listen(bc)
 
-    # Find blocks!
+    # List blocks
+    topBlock = bc.bestBlock
+    ancestorBlockChain = bc.blockAncestors(topBlock)
+    puts "Found #{ancestorBlockChain.length} members in chain for best block"
+    puts "#{ancestorBlockChain.indexed_blocks.length % DIFFICULTY_RETARGET_INTERVAL} blocks since point of last difficulty evaluation.  (If difficulty retargeting were implemented)"
+
+    ## Scratch area to develop difficulty retargetting.  (Obviously does not belong here in main)
+    #if (ancestorBlockChain.indexed_blocks.length >= DIFFICULTY_RETARGET_INTERVAL and ancestorBlockChain.indexed_blocks.length % DIFFICULTY_RETARGET_INTERVAL == 0)
+    #    # Get the block that's 2048th back from the current best block
+    #    blockArr = bc.blockAncestorsArr(topBlock, 2048)
+    #    puts blockArr[0].blockInfo(target)
+    #    timeSinceLastDiffChange = Time.now() - blockArr[0].genTime 
+    #    puts timeSinceLastDiffChange 
+    #end
+
+    ## Find blocks!
     generateBlocks( bc, target)
     exit 0
 
