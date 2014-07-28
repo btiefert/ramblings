@@ -26,7 +26,11 @@ RUN chmod +x /usr/local/bin/p4
 RUN mkdir -p /var/lib/jenkins/plugins
 RUN wget -O /var/lib/jenkins/plugins/perforce.hpi http://mirrors.jenkins-ci.org/plugins/perforce/latest/perforce.hpi
 
+
+VOLUME /var/lib/jenkins
+VOLUME /var/log/jenkins
+
 EXPOSE 8080 8009
 
 #CMD /etc/alternatives/java -Djava.awt.headless=true -DJENKINS_HOME=/var/lib/jenkins -jar /usr/lib/jenkins/jenkins.war --logfile=/var/log/jenkins/jenkins.log --webroot=/var/cache/jenkins/war --httpPort=8080 --ajp13Port=8009 --debug=5 --handlerCountMax=100 --handlerCountMaxIdle=20
-CMD /etc/alternatives/java -DJENKINS_HOME=/var/lib/jenkins -jar /usr/lib/jenkins/jenkins.war --webroot=/var/cache/jenkins/war --httpPort=8080 --ajp13Port=8009 --debug=5 --handlerCountMax=100 --handlerCountMaxIdle=20
+CMD /etc/alternatives/java -DJENKINS_HOME=/var/lib/jenkins -jar /usr/lib/jenkins/jenkins.war --logfile=/var/log/jenkins/jenkins.log --webroot=/var/cache/jenkins/war --httpPort=8080 --ajp13Port=8009 --debug=5 --handlerCountMax=100 --handlerCountMaxIdle=20
